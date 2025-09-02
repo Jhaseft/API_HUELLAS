@@ -11,8 +11,13 @@ def preprocess_fingerprint(img_path):
     if img is None:
         raise ValueError(f"No se pudo abrir la imagen: {img_path}")
 
+    # Normalizar tamaño
     img = cv2.resize(img, (300, 300))
+
+    # Mejorar contraste
     img_eq = cv2.equalizeHist(img)
+
+    # Suavizado
     img_blur = cv2.GaussianBlur(img_eq, (3, 3), 0)
 
     # Binarización Otsu
@@ -34,7 +39,7 @@ def compare_fingerprints(img1, img2, method="ORB"):
         img2 = cv2.resize(img2, (img1.shape[1], img1.shape[0]))
 
     if method == "ORB":
-        detector = cv2.ORB_create(nfeatures=1000)
+        detector = cv2.ORB_create(nfeatures=1500)
         norm_type = cv2.NORM_HAMMING
     else:
         detector = cv2.SIFT_create()
@@ -46,18 +51,23 @@ def compare_fingerprints(img1, img2, method="ORB"):
     if des1 is None or des2 is None:
         return 0.0
 
+    # Matching con ratio test
     bf = cv2.BFMatcher(norm_type)
     matches = bf.knnMatch(des1, des2, k=2)
+    good_matches = [m for m, n in matches if m.distance < 0.75 * n.distance]
 
-    good_matches = []
-    for m, n in matches:
-        if m.distance < 0.75 * n.distance:
-            good_matches.append(m)
-
-    if len(good_matches) == 0:
+    if len(good_matches) < 4:
         return 0.0
 
-    score = len(good_matches) / max(len(kp1), len(kp2))
+    src_pts = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+    dst_pts = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+
+    M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+    if mask is None:
+        return 0.0
+
+    inliers = mask.ravel().sum()
+    score = inliers / max(len(kp1), len(kp2))
     return score
 
 # =========================
@@ -71,5 +81,6 @@ def comparar_huellas(path1, path2):
 
     return {
         "similarity": float(score),
-        "resultado": "Coinciden" if score > 0.2 else "No coinciden"
+        "resultado": "✅ Coinciden" if score > 0.20 else "❌ No coinciden"
     }
+
